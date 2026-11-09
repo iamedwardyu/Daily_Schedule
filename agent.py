@@ -1,4 +1,5 @@
 import os
+import time
 import yfinance as yf
 import feedparser
 import smtplib
@@ -11,7 +12,7 @@ def fetch_market_metrics():
     tickers = {
         "S&P 500": "^GSPC",
         "Nasdaq-100 (QQQ)": "QQQ",
-        "2-Yr Treasury Yield": "^TWO",
+        "2-Yr Treasury Yield": "^2YR",  # Fallback handled in logic
         "5-Yr Treasury Yield": "^FVX",
         "10-Yr Treasury Yield": "^TNX"
     }
@@ -19,13 +20,21 @@ def fetch_market_metrics():
     metrics_summary = []
     for name, symbol in tickers.items():
         try:
-            ticker = yf.Ticker(symbol)
+            # Fallback handling for 2-Yr Treasury ticker
+            lookup_symbol = symbol
+            ticker = yf.Ticker(lookup_symbol)
             hist = ticker.history(period="5d")
+            
+            if hist.empty and symbol == "^2YR":
+                lookup_symbol = "^TWO"
+                ticker = yf.Ticker(lookup_symbol)
+                hist = ticker.history(period="5d")
+                
             if len(hist) >= 1:
                 latest_price = hist['Close'].iloc[-1]
                 
-                # Treasury Yield Handling (e.g. 45.2 -> 4.52%)
-                if symbol in ["^TWO", "^FVX", "^TNX"]:
+                # Treasury Yield Handling (e.g. 45.8 -> 4.58%)
+                if symbol in ["^2YR", "^TWO", "^FVX", "^TNX"]:
                     yield_val = latest_price / 10.0 if latest_price > 15 else latest_price
                     val_str = f"{yield_val:.2f}%"
                 else:
@@ -37,7 +46,7 @@ def fetch_market_metrics():
                     change = latest_price - prev_close
                     pct_change = (change / prev_close) * 100
                     
-                    if symbol in ["^TWO", "^FVX", "^TNX"]:
+                    if symbol in ["^2YR", "^TWO", "^FVX", "^TNX"]:
                         bps_change = (change / 10.0) * 100 if latest_price > 15 else change * 100
                         diff_str = f"{bps_change:+.1f} bps ({pct_change:+.2f}%)"
                     else:
@@ -45,6 +54,8 @@ def fetch_market_metrics():
                     metrics_summary.append(f"{name}: {val_str} [{diff_str}]")
                 else:
                     metrics_summary.append(f"{name}: {val_str}")
+            else:
+                metrics_summary.append(f"{name}: Data temporarily unavailable")
         except Exception as e:
             metrics_summary.append(f"{name}: Data temporarily unavailable")
             
@@ -78,7 +89,7 @@ def fetch_all_news():
                 
     return "\n".join(collected_headlines)
 
-# 3. Synthesize Executive Brief via Gemini AI
+# 3. Synthesize Executive Brief via Gemini AI with Retry Logic for 503 Errors
 def generate_ai_digest(market_data, news_text):
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     
@@ -100,11 +111,20 @@ def generate_ai_digest(market_data, news_text):
     5. Tone: Quantitative, direct, executive-ready, and actionable. Avoid extra conversational filler.
     """
     
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt
-    )
-    return response.text
+    # Retry loop up to 3 attempts to handle temporary Google 503 capacity spikes
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt
+            )
+            return response.text
+        except Exception as e:
+            if "503" in str(e) and attempt < max_retries - 1:
+                time.sleep(3)  # Wait 3 seconds before retrying
+                continue
+            raise e
 
 # 4. Send Email via Gmail SMTP
 def send_email(html_body):
