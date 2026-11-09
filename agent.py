@@ -11,74 +11,93 @@ def fetch_market_metrics():
     tickers = {
         "S&P 500": "^GSPC",
         "Nasdaq-100 (QQQ)": "QQQ",
-        "5-Yr Treasury Yield": "^FVX",  # 5-Year Treasury Note Yield
-        "10-Yr Treasury Yield": "^TNX"  # 10-Year Treasury Note Yield
+        "2-Yr Treasury Yield": "^TWO",
+        "5-Yr Treasury Yield": "^FVX",
+        "10-Yr Treasury Yield": "^TNX"
     }
     
     metrics_summary = []
     for name, symbol in tickers.items():
         try:
             ticker = yf.Ticker(symbol)
-            hist = ticker.history(period="2d")
+            hist = ticker.history(period="5d")
             if len(hist) >= 1:
                 latest_price = hist['Close'].iloc[-1]
-                if symbol in ["^FVX", "^TNX"]:
-                    val = f"{latest_price / 10:.2f}%"
-                else:
-                    val = f"{latest_price:,.2f}"
                 
+                # Treasury Yield Handling (e.g. 45.2 -> 4.52%)
+                if symbol in ["^TWO", "^FVX", "^TNX"]:
+                    yield_val = latest_price / 10.0 if latest_price > 15 else latest_price
+                    val_str = f"{yield_val:.2f}%"
+                else:
+                    val_str = f"{latest_price:,.2f}"
+                
+                # Calculate daily change
                 if len(hist) >= 2:
                     prev_close = hist['Close'].iloc[-2]
                     change = latest_price - prev_close
                     pct_change = (change / prev_close) * 100
-                    if symbol in ["^FVX", "^TNX"]:
-                        diff_str = f"{change/10:+.2f} bps ({pct_change:+.2f}%)"
+                    
+                    if symbol in ["^TWO", "^FVX", "^TNX"]:
+                        bps_change = (change / 10.0) * 100 if latest_price > 15 else change * 100
+                        diff_str = f"{bps_change:+.1f} bps ({pct_change:+.2f}%)"
                     else:
                         diff_str = f"{change:+.2f} ({pct_change:+.2f}%)"
-                    metrics_summary.append(f"{name}: {val} [{diff_str}]")
+                    metrics_summary.append(f"{name}: {val_str} [{diff_str}]")
                 else:
-                    metrics_summary.append(f"{name}: {val}")
+                    metrics_summary.append(f"{name}: {val_str}")
         except Exception as e:
-            metrics_summary.append(f"{name}: Data unavailable ({str(e)})")
+            metrics_summary.append(f"{name}: Data temporarily unavailable")
             
     return "\n".join(metrics_summary)
 
-# 2. Fetch Hospitality & Macro News Feeds (RSS)
-def fetch_industry_rss():
-    rss_urls = [
-        "https://www.hotelmanagement.net/rss.xml",
-        "https://skift.com/feed/"
-    ]
-    headlines = []
-    for url in rss_urls:
-        try:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:3]:
-                headlines.append(f"- {entry.title}: {entry.link}")
-        except Exception:
-            continue
-    return "\n".join(headlines) if headlines else "No RSS headlines fetched."
+# 2. Fetch Macro & Hotel / Lodging Industry RSS Feeds
+def fetch_all_news():
+    news_sources = {
+        "Macro & Fed Economy": [
+            "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+            "https://finance.yahoo.com/news/rssindex"
+        ],
+        "Hotel Industry & Lodging REITs": [
+            "https://www.hotelnewsresource.com/HNR_RSS.xml",
+            "https://skift.com/feed/",
+            "https://lodgingmagazine.com/feed/",
+            "https://www.hotelmanagement.net/rss.xml"
+        ]
+    }
+    
+    collected_headlines = []
+    for category, urls in news_sources.items():
+        collected_headlines.append(f"\n--- {category.upper()} ---")
+        for url in urls:
+            try:
+                feed = feedparser.parse(url)
+                for entry in feed.entries[:4]:
+                    collected_headlines.append(f"- {entry.title} ({entry.link})")
+            except Exception:
+                continue
+                
+    return "\n".join(collected_headlines)
 
-# 3. Synthesize Data with Gemini AI
-def generate_ai_digest(market_data, rss_news):
+# 3. Synthesize Executive Brief via Gemini AI
+def generate_ai_digest(market_data, news_text):
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     
     prompt = f"""
     You are an executive chief of staff for a Vice President of Hospitality Investments and Finance. 
-    Synthesize the following 9:15 AM market metrics and industry news into a concise, high-impact HTML daily morning email.
+    Synthesize the provided 9:15 AM market metrics, economic data, and lodging industry updates into a crisp, high-impact HTML morning email brief.
     
-    LIVE MARKET DATA:
+    LIVE MARKET & TREASURY DATA:
     {market_data}
     
-    HOTEL & MACRO NEWS HEADLINES:
-    {rss_news}
+    LATEST NEWS FEEDS:
+    {news_text}
     
-    EMAIL REQUIREMENTS:
-    1. Structure: Clean, professional HTML with simple inline CSS styling (dark gray headings, bold numbers).
-    2. Section 1: Financial & Yield Overview (Summary table or bullet list of S&P 500, QQQ, 5Yr, 10Yr yields).
-    3. Section 2: Macro & Fed Drivers (Provide concise commentary on current inflation/CPI, jobs reports, rates, or Fed policy drivers based on yield context).
-    4. Section 3: Hotel & Commercial Real Estate Highlights (Summarize top industry trends, transaction context, or lodging updates).
-    5. Keep the tone concise, quantitative, direct, and actionable. Avoid extra fluff.
+    EMAIL STRUCTURAL & CONTENT REQUIREMENTS:
+    1. Structure: Professional HTML email template with dark gray section headers (#1A2530), clean data tables, and bullet points.
+    2. Section 1: Financial & Yield Overview: Clean summary table of S&P 500, QQQ, 2-Yr, 5-Yr, and 10-Yr Treasury Yields with bps changes.
+    3. Section 2: Macro & Monetary Drivers: Highlight macroeconomic developments (Fed interest rate policies/hikes/cuts, CPI inflation reports, jobs/payrolls data, rate environment impact on debt/refinancing).
+    4. Section 3: Hotel & Lodging Industry Highlights: Synthesize key lodging news, including earnings releases/guidance from major hotel brands (Hilton, Marriott, Hyatt, Wyndham) and lodging REITs (Host Hotels, Park Hotels, Pebblebrook, Apple Hospitality), notable M&A/transactions, or STR/CoStar trend commentary.
+    5. Tone: Quantitative, direct, executive-ready, and actionable. Avoid extra conversational filler.
     """
     
     response = client.models.generate_content(
@@ -87,7 +106,7 @@ def generate_ai_digest(market_data, rss_news):
     )
     return response.text
 
-# 4. Send HTML Email via Gmail SMTP
+# 4. Send Email via Gmail SMTP
 def send_email(html_body):
     sender_email = os.environ["SENDER_EMAIL"]
     receiver_email = os.environ["RECEIVER_EMAIL"]
@@ -106,6 +125,6 @@ def send_email(html_body):
 
 if __name__ == "__main__":
     market_str = fetch_market_metrics()
-    rss_str = fetch_industry_rss()
-    html_digest = generate_ai_digest(market_str, rss_str)
+    news_str = fetch_all_news()
+    html_digest = generate_ai_digest(market_str, news_str)
     send_email(html_digest)
