@@ -11,7 +11,6 @@ def fetch_market_metrics():
     tickers = {
         "S&P 500": "^GSPC",
         "Nasdaq-100 (QQQ)": "QQQ",
-        "2-Yr Treasury Yield": "^2YR",  # Cboe 2-Year Treasury Note Yield
         "5-Yr Treasury Yield": "^FVX",  # 5-Year Treasury Note Yield
         "10-Yr Treasury Yield": "^TNX"  # 10-Year Treasury Note Yield
     }
@@ -23,18 +22,16 @@ def fetch_market_metrics():
             hist = ticker.history(period="2d")
             if len(hist) >= 1:
                 latest_price = hist['Close'].iloc[-1]
-                # For Treasury yields, yfinance quotes 10x value (e.g. 42.5 = 4.25%)
-                if symbol in ["^2YR", "^FVX", "^TNX"]:
+                if symbol in ["^FVX", "^TNX"]:
                     val = f"{latest_price / 10:.2f}%"
                 else:
                     val = f"{latest_price:,.2f}"
                 
-                # Calculate daily change if 2 days available
                 if len(hist) >= 2:
                     prev_close = hist['Close'].iloc[-2]
                     change = latest_price - prev_close
                     pct_change = (change / prev_close) * 100
-                    if symbol in ["^2YR", "^FVX", "^TNX"]:
+                    if symbol in ["^FVX", "^TNX"]:
                         diff_str = f"{change/10:+.2f} bps ({pct_change:+.2f}%)"
                     else:
                         diff_str = f"{change:+.2f} ({pct_change:+.2f}%)"
@@ -50,8 +47,7 @@ def fetch_market_metrics():
 def fetch_industry_rss():
     rss_urls = [
         "https://www.hotelmanagement.net/rss.xml",
-        "https://skift.com/feed/",
-        "https://go.gambero.de/rss/hotel-news-now" # or CoStar / STR feeds
+        "https://skift.com/feed/"
     ]
     headlines = []
     for url in rss_urls:
@@ -79,14 +75,14 @@ def generate_ai_digest(market_data, rss_news):
     
     EMAIL REQUIREMENTS:
     1. Structure: Clean, professional HTML with simple inline CSS styling (dark gray headings, bold numbers).
-    2. Section 1: Financial & Yield Overview (Summary table or bullet list of S&P 500, QQQ, 2Yr, 5Yr, 10Yr yields).
+    2. Section 1: Financial & Yield Overview (Summary table or bullet list of S&P 500, QQQ, 5Yr, 10Yr yields).
     3. Section 2: Macro & Fed Drivers (Provide concise commentary on current inflation/CPI, jobs reports, rates, or Fed policy drivers based on yield context).
     4. Section 3: Hotel & Commercial Real Estate Highlights (Summarize top industry trends, transaction context, or lodging updates).
     5. Keep the tone concise, quantitative, direct, and actionable. Avoid extra fluff.
     """
     
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         contents=prompt
     )
     return response.text
@@ -98,7 +94,7 @@ def send_email(html_body):
     app_password = os.environ["GMAIL_APP_PASSWORD"]
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f" Daily Morning Market & Hotel Digest — 9:15 AM CT"
+    msg["Subject"] = "Daily Morning Market & Hotel Digest — 9:15 AM CT"
     msg["From"] = sender_email
     msg["To"] = receiver_email
 
